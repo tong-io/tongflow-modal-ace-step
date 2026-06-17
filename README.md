@@ -1,6 +1,6 @@
 # tongflow-modal-ace-step
 
-Official TongFlow plugin. Text-to-music generation with **ACE-Step** (`ACE-Step/acestep-v15-xl-base` and `ACE-Step/acestep-5Hz-lm-4B`), running on a GPU via [Modal](https://modal.com).
+Official [TongFlow](https://github.com/tong-io/tongflow) plugin. Text-to-music generation with **ACE-Step** (`ACE-Step/acestep-v15-xl-base` and `ACE-Step/acestep-5Hz-lm-4B`), running on a GPU via [Modal](https://modal.com).
 
 ## Capabilities
 
