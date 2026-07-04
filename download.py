@@ -33,7 +33,9 @@ def _repo_dirs() -> list[tuple[str, str]]:
         if out:
             return out
     return [
+        ("ACE-Step/acestep-v15-xl-sft", ""),
         ("ACE-Step/acestep-v15-xl-base", ""),
+        ("ACE-Step/acestep-v15-xl-turbo", ""),
         ("ACE-Step/acestep-5Hz-lm-4B", ""),
     ]
 

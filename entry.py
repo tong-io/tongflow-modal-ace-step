@@ -182,6 +182,12 @@ def main() -> int:
         prompt = req.get("prompt") if isinstance(req.get("prompt"), dict) else {}
         if not node_slot:
             raise RuntimeError("missing nodeSlot")
+        # Router-style model choice travels top-level in the envelope; tuck it
+        # into the prompt under the SDK's reserved key so the remote @node_slot
+        # wrapper can pop it back out (tongflow.slots.current_model()).
+        model = req.get("model")
+        if isinstance(model, str) and model:
+            prompt = {**prompt, "_model": model}
         out = run(node_slot, prompt)
     except SystemExit:
         raise
