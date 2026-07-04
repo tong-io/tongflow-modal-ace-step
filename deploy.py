@@ -6,6 +6,7 @@ Deploy:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -45,7 +46,7 @@ volume = modal.Volume.from_name(_volume_name, create_if_missing=True)
 
 from tongflow.models.gen_music import GenMusicInput, GenMusicOutput
 from tongflow.node_slots import NodeSlots
-from tongflow.protocol import asset
+from tongflow.protocol import asset, asset_as_path
 from tongflow.slots import node_slot
 
 
@@ -54,7 +55,7 @@ app = modal.App(Path(__file__).resolve().parent.name)
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("git", "libsndfile1")
-    .pip_install("tongflow==0.1.0")
+    .pip_install("tongflow==0.2.1")
     .run_commands(
         f"git clone {REPO_URL} {REPO_DIR}",
         f"pip install --no-deps -e {REPO_DIR}/acestep/third_parts/nano-vllm",
@@ -111,6 +112,7 @@ class Inference:
         keyscale: str = "",
         language: str = "zh",
         seed: int = -1,
+        ref_audio_path: Optional[str] = None,
     ) -> bytes:
         params = GenerationParams(
             lyrics=lyrics,
@@ -120,6 +122,10 @@ class Inference:
             keyscale=keyscale,
             vocal_language=language,
             seed=seed,
+            # text2music consumes reference_audio directly for style-transfer
+            # conditioning (3x10s sampled segments); no task_type change and no
+            # audio_cover_strength override needed (cover tasks only).
+            reference_audio=ref_audio_path,
         )
         config = GenerationConfig(batch_size=1)
         result = generate_music(self.dit_handler, self.llm_handler, params, config)
@@ -162,15 +168,24 @@ class Inference:
         lyrics = input.lyrics or input.text or ""
         tags = input.tags or ""
         try:
-            raw = self._generate_raw(
-                lyrics=lyrics,
-                tags=tags,
-                duration=input.duration if input.duration is not None else 30.0,
-                bpm=int(input.bpm) if input.bpm is not None else None,
-                keyscale=input.keyscale or "",
-                language=input.language or "zh",
-                seed=int(input.seed) if input.seed is not None else -1,
-            )
+            with contextlib.ExitStack() as stack:
+                ref_audio_path: Optional[str] = None
+                if input.ref_audio is not None:
+                    ref_audio_path = str(
+                        stack.enter_context(asset_as_path(input.ref_audio))
+                    )
+                raw = self._generate_raw(
+                    lyrics=lyrics,
+                    tags=tags,
+                    duration=input.duration
+                    if input.duration is not None
+                    else 30.0,
+                    bpm=int(input.bpm) if input.bpm is not None else None,
+                    keyscale=input.keyscale or "",
+                    language=input.language or "zh",
+                    seed=int(input.seed) if input.seed is not None else -1,
+                    ref_audio_path=ref_audio_path,
+                )
         except Exception as e:
             return GenMusicOutput(success=False, error=str(e))
         return GenMusicOutput(success=True, audio=asset(raw, mime="audio/wav"))
