@@ -81,7 +81,10 @@ app = modal.App(Path(__file__).resolve().parent.name)
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .apt_install("git", "libsndfile1")
+    # ffmpeg: torchaudio/torchcodec's decode fallback needs its shared libs —
+    # without it, m4a/aac/webm reference audio fails as "Invalid reference audio"
+    # (libsndfile alone only covers wav/flac/ogg/mp3).
+    .apt_install("git", "libsndfile1", "ffmpeg")
     .pip_install("tongflow==0.2.3")
     .run_commands(
         f"git clone {REPO_URL} {REPO_DIR}",
@@ -223,6 +226,33 @@ class Inference:
         return buf.getvalue()
 
     @staticmethod
+    def _as_wav(stack: contextlib.ExitStack, media: Any) -> str:
+        """Materialize an incoming audio Asset as a WAV temp file.
+
+        Upstream's decode fallback (torchaudio/torchcodec) is broken in this
+        image (torchcodec wheel targets a different CUDA), so anything
+        libsndfile can't read (m4a/aac/webm...) would fail as "Invalid
+        reference audio". Transcoding through the ffmpeg CLI first makes the
+        soundfile fast path always hit.
+        """
+        import subprocess
+        import tempfile
+
+        src = str(stack.enter_context(asset_as_path(media)))
+        fd, wav = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+        stack.callback(lambda: os.path.exists(wav) and os.unlink(wav))
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", src, "-ac", "2", wav],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            tail = (proc.stderr or "").strip()[-300:]
+            raise RuntimeError(f"could not decode audio input: {tail}")
+        return wav
+
+    @staticmethod
     def _norm_track(track: str) -> str:
         t = (track or "").strip().lower()
         if t not in TRACK_NAMES:
@@ -239,7 +269,7 @@ class Inference:
             with contextlib.ExitStack() as stack:
                 ref_path: Optional[str] = None
                 if input.ref_audio is not None:
-                    ref_path = str(stack.enter_context(asset_as_path(input.ref_audio)))
+                    ref_path = self._as_wav(stack, input.ref_audio)
                 raw = self._run(
                     lyrics=input.lyrics or input.text or "",
                     caption=input.tags or "",
@@ -261,11 +291,12 @@ class Inference:
     def music_repaint(self, input: MusicRepaintInput) -> MusicRepaintOutput:
         try:
             self._ensure_dit(self._pick_model("music-repaint"))
-            with asset_as_path(input.audio) as src_path:
+            with contextlib.ExitStack() as stack:
+                src_path = self._as_wav(stack, input.audio)
                 raw = self._run(
                     task_type="repaint",
                     instruction=TASK_INSTRUCTIONS["repaint"],
-                    src_audio=str(src_path),
+                    src_audio=src_path,
                     caption=input.text or "",
                     lyrics=input.lyrics or "",
                     repainting_start=float(input.start_time),
@@ -285,10 +316,10 @@ class Inference:
         try:
             self._ensure_dit(self._pick_model("music-cover"))
             with contextlib.ExitStack() as stack:
-                src_path = str(stack.enter_context(asset_as_path(input.audio)))
+                src_path = self._as_wav(stack, input.audio)
                 ref_path: Optional[str] = None
                 if input.ref_audio is not None:
-                    ref_path = str(stack.enter_context(asset_as_path(input.ref_audio)))
+                    ref_path = self._as_wav(stack, input.ref_audio)
                 raw = self._run(
                     task_type="cover",
                     instruction=TASK_INSTRUCTIONS["cover"],
@@ -312,13 +343,14 @@ class Inference:
             # extract is a base-only capability upstream.
             self._ensure_dit(self._pick_model("music-extract"))
             track = self._norm_track(input.track)
-            with asset_as_path(input.audio) as src_path:
+            with contextlib.ExitStack() as stack:
+                src_path = self._as_wav(stack, input.audio)
                 raw = self._run(
                     task_type="extract",
                     instruction=TASK_INSTRUCTIONS["extract"].format(
                         TRACK_NAME=track.upper()
                     ),
-                    src_audio=str(src_path),
+                    src_audio=src_path,
                     seed=int(input.seed) if input.seed is not None else -1,
                 )
         except Exception as e:
@@ -331,13 +363,14 @@ class Inference:
         try:
             self._ensure_dit(self._pick_model("music-lego"))
             track = self._norm_track(input.track)
-            with asset_as_path(input.audio) as src_path:
+            with contextlib.ExitStack() as stack:
+                src_path = self._as_wav(stack, input.audio)
                 raw = self._run(
                     task_type="lego",
                     instruction=TASK_INSTRUCTIONS["lego"].format(
                         TRACK_NAME=track.upper()
                     ),
-                    src_audio=str(src_path),
+                    src_audio=src_path,
                     caption=input.text or "",
                     lyrics=input.lyrics or "",
                     seed=int(input.seed) if input.seed is not None else -1,
@@ -358,11 +391,12 @@ class Inference:
                 )
             else:
                 instruction = TASK_INSTRUCTIONS["complete_default"]
-            with asset_as_path(input.audio) as src_path:
+            with contextlib.ExitStack() as stack:
+                src_path = self._as_wav(stack, input.audio)
                 raw = self._run(
                     task_type="complete",
                     instruction=instruction,
-                    src_audio=str(src_path),
+                    src_audio=src_path,
                     caption=input.text or "",
                     seed=int(input.seed) if input.seed is not None else -1,
                 )
@@ -400,8 +434,9 @@ class Inference:
     @node_slot(NodeSlots.AUDIO_DESCRIBE)
     def audio_describe(self, input: AudioDescribeInput) -> AudioDescribeOutput:
         try:
-            with asset_as_path(input.audio) as src_path:
-                codes = self.dit_handler.convert_src_audio_to_codes(str(src_path))
+            with contextlib.ExitStack() as stack:
+                src_path = self._as_wav(stack, input.audio)
+                codes = self.dit_handler.convert_src_audio_to_codes(src_path)
             res = understand_music(self.llm_handler, codes)
             parts: list[str] = []
             caption = getattr(res, "caption", None)
