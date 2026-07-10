@@ -1,4 +1,9 @@
 {
+    "plugin": {
+        "name": "ACE-Step",
+        "description": "Text-to-music generation with ACE-Step.",
+        "icon": "/plugins/tongflow-modal-ace-step.svg"
+    },
     "env": [
         {
             "key": "MODAL_TOKEN_ID",
