@@ -18,6 +18,11 @@ from tongflow import deploy
 
 
 
+# Slots this plugin is the default implementation of: the node picker lists
+# it first and a newly added node preselects it. Read statically by the
+# scanner (never executed), so any SDK version imports this file fine.
+TONGFLOW_DEFAULT_SLOTS = ["gen-music"]
+
 _cfg: dict[str, Any] = {}
 _ace = _cfg.get("aceStep") if isinstance(_cfg.get("aceStep"), dict) else {}
 REPO_URL = str(
