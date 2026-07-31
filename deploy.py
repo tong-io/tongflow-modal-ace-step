@@ -90,7 +90,7 @@ image = (
     # without it, m4a/aac/webm reference audio fails as "Invalid reference audio"
     # (libsndfile alone only covers wav/flac/ogg/mp3).
     .apt_install("git", "libsndfile1", "ffmpeg")
-    .pip_install("tongflow==0.2.16", "fastapi[standard]")
+    .pip_install("tongflow==0.2.20", "fastapi[standard]")
     .run_commands(
         f"git clone {REPO_URL} {REPO_DIR}",
         f"git -C {REPO_DIR} checkout {REPO_REV}",
