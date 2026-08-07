@@ -118,7 +118,7 @@ with image.imports():
 
 @deploy
 @app.cls(
-    scaledown_window=5,
+    scaledown_window=2,
     image=image,
     gpu="L40S",
     volumes={"/models": volume},
