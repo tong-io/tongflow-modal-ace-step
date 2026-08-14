@@ -58,9 +58,11 @@ TONGFLOW_SLOT_MODELS = {
 }
 
 DEFAULT_DIT = "acestep-v15-xl-sft"
-# Every variant's weights live in the shared volume as its own HF snapshot.
-# sft/base snapshots are full bundles (shared assets + nested variant dir);
-# the turbo snapshot is flat — it IS the variant dir.
+# Every repo lives in the shared volume as its own HF snapshot. The main
+# bundle carries the shared assets (vae, Qwen3-Embedding-0.6B, default DiT,
+# default 1.7B LM) that upstream's check_main_model_exists requires; each
+# xl variant snapshot is flat — it IS the variant dir.
+MAIN_SNAP = "/models/ACE-Step/Ace-Step1.5"
 SFT_SNAP = "/models/ACE-Step/acestep-v15-xl-sft"
 BASE_SNAP = "/models/ACE-Step/acestep-v15-xl-base"
 TURBO_SNAP = "/models/ACE-Step/acestep-v15-xl-turbo"
@@ -151,13 +153,13 @@ class Inference:
             if not os.path.exists(dst) and os.path.exists(target):
                 os.symlink(target, dst)
 
-        # Shared assets (vae, embedding model, main-model shards) + the sft
-        # variant dir all come from the sft bundle.
-        for entry in os.listdir(SFT_SNAP):
-            link(os.path.join(SFT_SNAP, entry), entry)
-        # The base bundle contributes only its variant dir.
-        link(os.path.join(BASE_SNAP, "acestep-v15-xl-base"), "acestep-v15-xl-base")
-        # The turbo snapshot is flat: the snapshot dir IS the variant dir.
+        # Shared assets (vae, Qwen3-Embedding-0.6B, acestep-v15-turbo,
+        # acestep-5Hz-lm-1.7B) come from the main bundle.
+        for entry in os.listdir(MAIN_SNAP):
+            link(os.path.join(MAIN_SNAP, entry), entry)
+        # Each xl variant snapshot is flat: the snapshot dir IS the variant dir.
+        link(SFT_SNAP, "acestep-v15-xl-sft")
+        link(BASE_SNAP, "acestep-v15-xl-base")
         link(TURBO_SNAP, "acestep-v15-xl-turbo")
 
     def _ensure_dit(self, config: str) -> None:

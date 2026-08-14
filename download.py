@@ -33,6 +33,9 @@ def _repo_dirs() -> list[tuple[str, str]]:
         if out:
             return out
     return [
+        # Main bundle: shared assets (vae, Qwen3-Embedding-0.6B, default DiT,
+        # default 1.7B LM) that upstream's check_main_model_exists requires.
+        ("ACE-Step/Ace-Step1.5", ""),
         ("ACE-Step/acestep-v15-xl-sft", ""),
         ("ACE-Step/acestep-v15-xl-base", ""),
         ("ACE-Step/acestep-v15-xl-turbo", ""),
