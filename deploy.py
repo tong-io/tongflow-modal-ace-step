@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from typing import Any, Optional, cast
 
+import re
+
 import modal
 from tongflow import deploy
 
@@ -30,7 +32,7 @@ REPO_URL = str(
 )
 REPO_DIR = str(_ace.get("repoDir") or "/app/ACE-Step-1.5")
 # Pin the upstream revision so redeploys are reproducible (main moves).
-REPO_REV = str(_ace.get("gitRev") or "6d467e4b5081ccb0abf1ec1bf4fdf9051a2d34b0")
+REPO_REV = str(_ace.get("gitRev") or "ca1e85fe9430179831e6bc6be790c332190a3866")
 
 # DiT variants selectable per node (first entry per slot = default).
 # xl-sft: best quality (Model Zoo "Very High"); xl-base: the only variant that
@@ -58,6 +60,37 @@ TONGFLOW_SLOT_MODELS = {
 }
 
 DEFAULT_DIT = "acestep-v15-xl-sft"
+
+# Advanced knobs under the node's collapsed section (pure literal, read by AST).
+# Workflow runs do not carry advanced params yet (the exporter drops
+# pluginParams), so lego also reads "100 BPM" / "A minor" from its caption.
+_CAPTION_BPM = re.compile(r"\b(\d{2,3})\s*BPM\b", re.I)
+_CAPTION_KEY = re.compile(r"\b([A-G](?:#|b)?)\s+(major|minor)\b", re.I)
+
+
+def _caption_bpm(text):
+    m = _CAPTION_BPM.search(text or "")
+    return int(m.group(1)) if m else None
+
+
+def _caption_strip(text):
+    """Caption without the tempo/key words (upstream: describe only the new track)."""
+    t = _CAPTION_KEY.sub("", _CAPTION_BPM.sub("", text or ""))
+    return re.sub(r"\s*,\s*(,\s*)+", ", ", t).strip(" ,")
+
+
+def _caption_key(text):
+    m = _CAPTION_KEY.search(text or "")
+    return f"{m.group(1)[0].upper()}{m.group(1)[1:]} {m.group(2).lower()}" if m else ""
+
+
+TONGFLOW_SLOT_PARAMS = {
+    "music-lego": {
+        "bpm": {"type": "integer", "default": 0, "min": 0, "max": 300, "step": 1, "label": "BPM", "description": "Tempo of the context audio; 0 leaves it unset"},
+        "keyscale": {"type": "text", "default": "", "label": "Key", "description": "Key of the context audio, e.g. A minor; empty leaves it unset"},
+    },
+}
+
 # Every repo lives in the shared volume as its own HF snapshot. The main
 # bundle carries the shared assets (vae, Qwen3-Embedding-0.6B, default DiT,
 # default 1.7B LM) that upstream's check_main_model_exists requires; each
@@ -81,7 +114,7 @@ from tongflow.models.music_lego import MusicLegoInput, MusicLegoOutput
 from tongflow.models.music_repaint import MusicRepaintInput, MusicRepaintOutput
 from tongflow.node_slots import NodeSlots
 from tongflow.protocol import asset, asset_as_path
-from tongflow.slots import current_model, node_slot
+from tongflow.slots import current_model, current_params, node_slot
 
 
 app = modal.App(Path(__file__).resolve().parent.name)
@@ -378,9 +411,11 @@ class Inference:
                         TRACK_NAME=track.upper()
                     ),
                     src_audio=src_path,
-                    caption=input.text or "",
+                    caption=_caption_strip(input.text),
                     lyrics=input.lyrics or "",
                     seed=int(input.seed) if input.seed is not None else -1,
+                    bpm=int(current_params().get("bpm") or 0) or _caption_bpm(input.text),
+                    keyscale=str(current_params().get("keyscale") or "") or _caption_key(input.text),
                 )
         except Exception as e:
             return MusicLegoOutput(success=False, error=str(e))
